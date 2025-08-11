@@ -10,11 +10,11 @@ if ! command -v node >/dev/null 2>&1; then
   sudo apt-get install -y nodejs
 fi
 
-# Install dependencies
 cd "$APP_DIR"
+# Install or update dependencies
 npm install --production
 
-# Create systemd service
+# Create or update systemd service
 SERVICE_FILE="/etc/systemd/system/transcript.service"
 sudo tee "$SERVICE_FILE" > /dev/null <<SERVICE
 [Unit]
@@ -30,9 +30,9 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 SERVICE
-
 sudo systemctl daemon-reload
-sudo systemctl enable --now transcript.service
+sudo systemctl enable transcript.service
+sudo systemctl restart transcript.service
 
-echo "Service started. Listening on port 3000"
+echo "Service started. Listening on port 3001"
 

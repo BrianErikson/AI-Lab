@@ -1,2 +1,7 @@
 # AI-Lab
-Tools made for users of AI, by AI
+
+Monorepo for tools built by AI for AI users.
+
+## Projects
+
+- [youtube-transcript-service](./youtube-transcript-service) – Node.js service that returns the transcript of a YouTube video.

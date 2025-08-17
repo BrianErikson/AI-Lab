@@ -10,6 +10,23 @@ if ! command -v node >/dev/null 2>&1; then
   sudo apt-get install -y nodejs
 fi
 
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "Installing ffmpeg..."
+  sudo apt-get update
+  sudo apt-get install -y ffmpeg
+fi
+
+if ! command -v pipx >/dev/null 2>&1; then
+  echo "Installing pipx..."
+  sudo apt-get install -y pipx
+  pipx ensurepath
+fi
+
+if ! command -v whisper >/dev/null 2>&1; then
+  echo "Installing Whisper..."
+  pipx install openai-whisper
+fi
+
 cd "$APP_DIR"
 # Install or update dependencies
 npm install --production

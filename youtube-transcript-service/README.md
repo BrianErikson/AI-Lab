@@ -1,6 +1,6 @@
 # YouTube Transcript Service
 
-Small Node.js service that transcribes audio using [Whisper](https://github.com/openai/whisper). It can download audio from a YouTube URL or transcribe an uploaded audio file.
+Small Node.js service that transcribes audio using [Whisper](https://github.com/openai/whisper). It can download audio from a YouTube URL or transcribe an uploaded audio file. Transcriptions include basic video metadata at the top.
 
 ## Quick start
 

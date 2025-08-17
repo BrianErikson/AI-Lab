@@ -111,6 +111,36 @@ export function normalizeYoutubeUrl(url) {
   return `https://www.youtube.com/watch?v=${id}`;
 }
 
+async function fetchVideoMetadata(url) {
+  try {
+    const out = await youtubedl(url, {
+      dumpSingleJson: true,
+      quiet: true,
+      noWarnings: true,
+      skipDownload: true
+    });
+    const info = typeof out === 'string' ? JSON.parse(out) : out;
+    return {
+      title: info.title,
+      uploader: info.uploader,
+      url: info.webpage_url,
+      uploadDate: info.upload_date
+    };
+  } catch (e) {
+    console.warn('metadata fetch failed:', e.message || e);
+    return {};
+  }
+}
+
+function formatMetadata(meta) {
+  const lines = [];
+  if (meta.title) lines.push(`Title: ${meta.title}`);
+  if (meta.uploader) lines.push(`Author: ${meta.uploader}`);
+  if (meta.url) lines.push(`URL: ${meta.url}`);
+  if (meta.uploadDate) lines.push(`Date: ${meta.uploadDate}`);
+  return lines.join('\n');
+}
+
 const defaultWhisper = path.join(homedir(), '.local', 'bin', 'whisper');
 const WHISPER_BIN = process.env.WHISPER_BIN || (fs.existsSync(defaultWhisper) ? defaultWhisper : 'whisper');
 
@@ -183,6 +213,7 @@ app.post('/transcript', async (req, res) => {
   let audioPath;
   let jsonPath;
   try {
+    const metadataPromise = fetchVideoMetadata(normalizedUrl);
     audioPath = await enqueue(() =>
       withBackoff(() => downloadYoutubeAudio(normalizedUrl), {
         retries: YTDLP_RETRIES,
@@ -192,8 +223,12 @@ app.post('/transcript', async (req, res) => {
     );
     const result = await runWhisper(audioPath);
     jsonPath = result.jsonPath;
-    writeCache(id, result.text);
-    res.type('text/plain').send(result.text.trim());
+    const meta = await metadataPromise;
+    const header = formatMetadata(meta);
+    const body = result.text.trim();
+    const output = header ? `${header}\n\n${body}` : body;
+    writeCache(id, output);
+    res.type('text/plain').send(output);
   } catch (e) {
     console.error('Transcription error:', e);
     res.status(500).json({ error: e.message });

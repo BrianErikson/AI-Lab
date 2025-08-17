@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs/promises';
+import { createReadStream } from 'fs';
 import path from 'path';
 import { tmpdir } from 'os';
 import { app } from './server.js';
@@ -16,10 +17,11 @@ test('transcribes sample audio with whisper', { skip: !RUN }, async (t) => {
   const server = app.listen(0);
   t.after(() => server.close());
   const port = server.address().port;
+  const form = new FormData();
+  form.append('file', createReadStream(file));
   const res = await fetch(`http://localhost:${port}/transcript`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: file })
+    method: 'PUT',
+    body: form
   });
   assert.equal(res.status, 200);
   const transcription = (await res.text()).toLowerCase();

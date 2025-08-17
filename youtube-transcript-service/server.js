@@ -5,13 +5,11 @@ import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import ytdl from 'ytdl-core';
+import multer from 'multer';
 
 export const app = express();
 app.use(express.json());
-
-function isLocalFile(p) {
-  return fs.existsSync(p);
-}
+const upload = multer({ dest: tmpdir() });
 
 async function downloadYoutubeAudio(url) {
   const output = path.join(tmpdir(), `${randomUUID()}.mp3`);
@@ -51,14 +49,14 @@ async function runWhisper(audioPath) {
 
 app.post('/transcript', async (req, res) => {
   const { url } = req.body;
-  console.log('Transcript request:', url);
+  console.log('Transcript request (YouTube URL):', url);
   if (!url) {
     return res.status(400).json({ error: 'url required' });
   }
   let audioPath;
   let jsonPath;
   try {
-    audioPath = isLocalFile(url) ? url : await downloadYoutubeAudio(url);
+    audioPath = await downloadYoutubeAudio(url);
     const result = await runWhisper(audioPath);
     jsonPath = result.jsonPath;
     res.type('text/plain').send(result.text.trim());
@@ -67,7 +65,25 @@ app.post('/transcript', async (req, res) => {
     res.status(500).json({ error: e.message });
   } finally {
     if (jsonPath) fs.unlink(jsonPath, () => {});
-    if (audioPath && !isLocalFile(url)) fs.unlink(audioPath, () => {});
+    if (audioPath) fs.unlink(audioPath, () => {});
+  }
+});
+
+app.put('/transcript', upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'file required' });
+  }
+  let jsonPath;
+  try {
+    const result = await runWhisper(req.file.path);
+    jsonPath = result.jsonPath;
+    res.type('text/plain').send(result.text.trim());
+  } catch (e) {
+    console.error('Transcription error:', e.message);
+    res.status(500).json({ error: e.message });
+  } finally {
+    if (jsonPath) fs.unlink(jsonPath, () => {});
+    fs.unlink(req.file.path, () => {});
   }
 });
 

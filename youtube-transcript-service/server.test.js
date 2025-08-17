@@ -13,3 +13,11 @@ test('requires url', async (t) => {
   });
   assert.equal(res.status, 400);
 });
+
+test('requires file on PUT', async (t) => {
+  const server = app.listen(0);
+  t.after(() => server.close());
+  const port = server.address().port;
+  const res = await fetch(`http://localhost:${port}/transcript`, { method: 'PUT' });
+  assert.equal(res.status, 400);
+});

@@ -1,24 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'fs/promises';
-import { createReadStream } from 'fs';
-import path from 'path';
-import { tmpdir } from 'os';
 import { app } from './server.js';
 
 const RUN = process.env.RUN_WHISPER_TEST;
 
 test('transcribes sample audio with whisper', { skip: !RUN }, async (t) => {
-  const file = path.join(tmpdir(), 'jfk.flac');
   const audioRes = await fetch('https://raw.githubusercontent.com/openai/whisper/main/tests/jfk.flac');
   const buf = Buffer.from(await audioRes.arrayBuffer());
-  await fs.writeFile(file, buf);
 
   const server = app.listen(0);
   t.after(() => server.close());
   const port = server.address().port;
   const form = new FormData();
-  form.append('file', createReadStream(file));
+  form.append('file', new Blob([buf]), 'jfk.flac');
   const res = await fetch(`http://localhost:${port}/transcript`, {
     method: 'PUT',
     body: form

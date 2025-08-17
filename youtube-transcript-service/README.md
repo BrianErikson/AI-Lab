@@ -13,6 +13,7 @@ cd AI-Lab/youtube-transcript-service
 ```
 
 The script installs Node.js (if missing), Whisper, and other dependencies. It recreates the `transcript` systemd service and restarts it on port `3001`.
+The server searches for the Whisper CLI in your `PATH` or at `~/.local/bin/whisper`; set `WHISPER_BIN` if it lives elsewhere.
 
 ## API
 

@@ -1,7 +1,7 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
-import { tmpdir } from 'os';
+import { tmpdir, homedir } from 'os';
 import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import ytdl from 'ytdl-core';
@@ -10,6 +10,9 @@ import multer from 'multer';
 export const app = express();
 app.use(express.json());
 const upload = multer({ dest: tmpdir() });
+
+const defaultWhisper = path.join(homedir(), '.local', 'bin', 'whisper');
+const WHISPER_BIN = process.env.WHISPER_BIN || (fs.existsSync(defaultWhisper) ? defaultWhisper : 'whisper');
 
 async function downloadYoutubeAudio(url) {
   const output = path.join(tmpdir(), `${randomUUID()}.mp3`);
@@ -29,7 +32,7 @@ async function runWhisper(audioPath) {
   const base = path.basename(audioPath, path.extname(audioPath));
   const jsonPath = path.join(dir, `${base}.json`);
   await new Promise((resolve, reject) => {
-    const proc = spawn('whisper', [
+    const proc = spawn(WHISPER_BIN, [
       audioPath,
       '--model', 'small',
       '--output_dir', dir,

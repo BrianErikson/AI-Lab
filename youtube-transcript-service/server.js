@@ -188,6 +188,138 @@ async function runWhisper(audioPath) {
   return { text: data.text, jsonPath };
 }
 
+// --- Job queue for asynchronous processing ---
+const jobs = new Map();
+const jobQueue = [];
+let jobActive = false;
+
+function now() {
+  return Date.now();
+}
+
+function createJob(url, videoId) {
+  const id = randomUUID();
+  const job = {
+    id,
+    url,
+    videoId,
+    status: 'queued',
+    createdAt: now(),
+    updatedAt: now()
+  };
+  jobs.set(id, job);
+  return job;
+}
+
+function enqueueJob(job) {
+  jobQueue.push(job);
+  setImmediate(pumpJobs);
+}
+
+async function pumpJobs() {
+  if (jobActive || jobQueue.length === 0) return;
+  jobActive = true;
+  const job = jobQueue.shift();
+  try {
+    job.status = 'running';
+    job.updatedAt = now();
+    const cached = readCache(job.videoId);
+    if (cached) {
+      job.text = cached.trim();
+      job.status = 'done';
+      job.updatedAt = now();
+    } else {
+      if (process.env.JOB_SKIP) {
+        throw new Error('job execution skipped');
+      }
+      const normalized = normalizeYoutubeUrl(job.url);
+      let audioPath;
+      let jsonPath;
+      try {
+        const metadataPromise = fetchVideoMetadata(normalized);
+        audioPath = await downloadYoutubeAudio(normalized);
+        const result = await runWhisper(audioPath);
+        jsonPath = result.jsonPath;
+        const meta = await metadataPromise;
+        const header = formatMetadata(meta);
+        const body = result.text.trim();
+        const output = header ? `${header}\n\n${body}` : body;
+        writeCache(job.videoId, output);
+        job.text = output;
+        job.status = 'done';
+        job.updatedAt = now();
+      } finally {
+        try {
+          if (jsonPath) fs.unlink(jsonPath, () => {});
+        } catch {}
+        try {
+          if (audioPath) fs.unlink(audioPath, () => {});
+        } catch {}
+      }
+    }
+  } catch (e) {
+    job.status = 'error';
+    job.error = String(e?.message || e);
+    job.updatedAt = now();
+  } finally {
+    jobActive = false;
+    setTimeout(pumpJobs, 2000);
+  }
+}
+
+setInterval(() => {
+  const ttl = Number(process.env.JOB_TTL_MS || 30 * 60 * 1000);
+  const cutoff = now() - ttl;
+  for (const [id, job] of jobs) {
+    if ((job.status === 'done' || job.status === 'error') && job.updatedAt < cutoff) {
+      jobs.delete(id);
+    }
+  }
+}, 10 * 60 * 1000).unref();
+
+// --- Job endpoints ---
+app.post('/jobs', async (req, res) => {
+  const { url } = req.body || {};
+  if (typeof url !== 'string' || !url.trim()) {
+    return res.status(400).json({ error: 'url required' });
+  }
+  let videoId;
+  try {
+    videoId = extractVideoID(url.trim());
+    normalizeYoutubeUrl(url.trim());
+  } catch {
+    return res.status(400).json({ error: 'invalid YouTube url' });
+  }
+  const job = createJob(url.trim(), videoId);
+  const cached = readCache(videoId);
+  if (cached) {
+    job.status = 'done';
+    job.text = cached.trim();
+  } else {
+    enqueueJob(job);
+  }
+  res
+    .status(cached ? 200 : 202)
+    .set('Location', `/jobs/${job.id}`)
+    .set('Retry-After', '5')
+    .json({ id: job.id, status: job.status });
+});
+
+app.get('/jobs/:id/status', (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'job not found' });
+  res.json({ id: job.id, status: job.status, error: job.error });
+});
+
+app.get('/jobs/:id/result', (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'job not found' });
+  if (job.status !== 'done') {
+    return res.status(409).json({ error: 'not ready', status: job.status });
+  }
+  res.type('text/plain').send(job.text || '');
+});
+
 app.post('/transcript', async (req, res) => {
   const { url } = req.body;
   console.log('Transcript request (YouTube URL):', url);

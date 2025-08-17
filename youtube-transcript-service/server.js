@@ -17,6 +17,11 @@ const CACHE_DIR = process.env.CACHE_DIR || path.join(homedir(), '.transcripts-ca
 const CACHE_TTL_MS = parseInt(process.env.CACHE_TTL_MS || '604800000', 10);
 const YTDLP_LIMIT_RATE = process.env.YTDLP_LIMIT_RATE || '1500K';
 const YTDLP_RETRIES = parseInt(process.env.YTDLP_RETRIES || '3', 10);
+const MAX_DOWNLOAD_MS = parseInt(process.env.MAX_DOWNLOAD_MS || '300000', 10);
+const MAX_TRANSCRIBE_MS = parseInt(process.env.MAX_TRANSCRIBE_MS || '900000', 10);
+const WHISPER_CONCURRENCY = parseInt(process.env.WHISPER_CONCURRENCY || '1', 10);
+const CACHE_SWEEP_MS = parseInt(process.env.CACHE_SWEEP_MS || '3600000', 10);
+const CACHE_MAX_BYTES = parseInt(process.env.CACHE_MAX_BYTES || '0', 10);
 
 fs.mkdirSync(CACHE_DIR, { recursive: true });
 
@@ -68,6 +73,15 @@ export async function withBackoff(fn, opts = {}) {
   }
 }
 
+function withTimeout(ms, fn, msg) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), ms);
+  return fn(ac.signal).catch(e => {
+    if (ac.signal.aborted) throw new Error(msg);
+    throw e;
+  }).finally(() => clearTimeout(timer));
+}
+
 function cachePath(id) {
   return path.join(CACHE_DIR, `${id}.txt`);
 }
@@ -88,6 +102,38 @@ function writeCache(id, text) {
     fs.writeFileSync(cachePath(id), text);
   } catch {}
 }
+
+function sweepCache() {
+  try {
+    const files = fs.readdirSync(CACHE_DIR).map(f => path.join(CACHE_DIR, f));
+    let total = 0;
+    const entries = [];
+    for (const fp of files) {
+      try {
+        const stat = fs.statSync(fp);
+        if (Date.now() - stat.mtimeMs > CACHE_TTL_MS) {
+          fs.unlinkSync(fp);
+          continue;
+        }
+        total += stat.size;
+        entries.push({ path: fp, mtime: stat.mtimeMs, size: stat.size });
+      } catch {}
+    }
+    if (CACHE_MAX_BYTES > 0 && total > CACHE_MAX_BYTES) {
+      entries.sort((a, b) => a.mtime - b.mtime);
+      for (const e of entries) {
+        if (total <= CACHE_MAX_BYTES) break;
+        try {
+          fs.unlinkSync(e.path);
+          total -= e.size;
+        } catch {}
+      }
+    }
+  } catch {}
+}
+
+sweepCache();
+setInterval(sweepCache, CACHE_SWEEP_MS).unref();
 
 export function extractVideoID(url) {
   try {
@@ -148,24 +194,55 @@ async function downloadYoutubeAudio(url) {
   const id = extractVideoID(url);
   console.log('Downloading audio for video ID:', id);
   const output = path.join(tmpdir(), `${randomUUID()}.mp3`);
-  await youtubedl(url, {
-    output,
-    extractAudio: true,
-    audioFormat: 'mp3',
-    audioQuality: 0,
-    quiet: true,
-    noPlaylist: true,
-    ignoreConfig: true,
-    concurrentFragments: 1,
-    sleepRequests: 1.0,
-    limitRate: YTDLP_LIMIT_RATE,
-    retries: YTDLP_RETRIES,
-    fragmentRetries: YTDLP_RETRIES
-  });
+  await withTimeout(
+    MAX_DOWNLOAD_MS,
+    signal =>
+      youtubedl(url, {
+        output,
+        extractAudio: true,
+        audioFormat: 'mp3',
+        audioQuality: 0,
+        quiet: true,
+        noPlaylist: true,
+        ignoreConfig: true,
+        concurrentFragments: 1,
+        sleepRequests: 1.0,
+        limitRate: YTDLP_LIMIT_RATE,
+        retries: YTDLP_RETRIES,
+        fragmentRetries: YTDLP_RETRIES
+      }, { signal }),
+    'download timeout'
+  );
   return output;
 }
 
-async function runWhisper(audioPath) {
+const whisperQueue = [];
+let whisperActive = 0;
+
+function withWhisperLimit(fn) {
+  return new Promise((resolve, reject) => {
+    whisperQueue.push({ fn, resolve, reject });
+    pumpWhisper();
+  });
+}
+
+function pumpWhisper() {
+  if (whisperActive >= WHISPER_CONCURRENCY || whisperQueue.length === 0) return;
+  const { fn, resolve, reject } = whisperQueue.shift();
+  whisperActive++;
+  (async () => {
+    try {
+      resolve(await fn());
+    } catch (e) {
+      reject(e);
+    } finally {
+      whisperActive--;
+      setImmediate(pumpWhisper);
+    }
+  })();
+}
+
+async function runWhisperInternal(audioPath, signal) {
   const dir = path.dirname(audioPath);
   const base = path.basename(audioPath, path.extname(audioPath));
   const jsonPath = path.join(dir, `${base}.json`);
@@ -177,7 +254,7 @@ async function runWhisper(audioPath) {
       '--output_format', 'json',
       '--language', 'en',
       '--fp16', 'False'
-    ], { stdio: 'ignore' });
+    ], { stdio: 'ignore', signal });
     proc.on('error', reject);
     proc.on('close', code => {
       if (code === 0) resolve();
@@ -186,6 +263,16 @@ async function runWhisper(audioPath) {
   });
   const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
   return { text: data.text, jsonPath };
+}
+
+function runWhisper(audioPath) {
+  return withWhisperLimit(() =>
+    withTimeout(
+      MAX_TRANSCRIBE_MS,
+      signal => runWhisperInternal(audioPath, signal),
+      'transcription timeout'
+    )
+  );
 }
 
 // --- Job queue for asynchronous processing ---
@@ -221,14 +308,14 @@ async function pumpJobs() {
   jobActive = true;
   const job = jobQueue.shift();
   try {
-    job.status = 'running';
-    job.updatedAt = now();
     const cached = readCache(job.videoId);
     if (cached) {
       job.text = cached.trim();
-      job.status = 'done';
+      job.status = 'ready';
       job.updatedAt = now();
     } else {
+      job.status = 'downloading';
+      job.updatedAt = now();
       if (process.env.JOB_SKIP) {
         throw new Error('job execution skipped');
       }
@@ -237,7 +324,15 @@ async function pumpJobs() {
       let jsonPath;
       try {
         const metadataPromise = fetchVideoMetadata(normalized);
-        audioPath = await downloadYoutubeAudio(normalized);
+        audioPath = await enqueue(() =>
+          withBackoff(() => downloadYoutubeAudio(normalized), {
+            retries: YTDLP_RETRIES,
+            base: 1000,
+            max: 15000
+          })
+        );
+        job.status = 'transcribing';
+        job.updatedAt = now();
         const result = await runWhisper(audioPath);
         jsonPath = result.jsonPath;
         const meta = await metadataPromise;
@@ -246,7 +341,7 @@ async function pumpJobs() {
         const output = header ? `${header}\n\n${body}` : body;
         writeCache(job.videoId, output);
         job.text = output;
-        job.status = 'done';
+        job.status = 'ready';
         job.updatedAt = now();
       } finally {
         try {
@@ -271,7 +366,7 @@ setInterval(() => {
   const ttl = Number(process.env.JOB_TTL_MS || 30 * 60 * 1000);
   const cutoff = now() - ttl;
   for (const [id, job] of jobs) {
-    if ((job.status === 'done' || job.status === 'error') && job.updatedAt < cutoff) {
+    if ((job.status === 'ready' || job.status === 'error') && job.updatedAt < cutoff) {
       jobs.delete(id);
     }
   }
@@ -293,7 +388,7 @@ app.post('/jobs', async (req, res) => {
   const job = createJob(url.trim(), videoId);
   const cached = readCache(videoId);
   if (cached) {
-    job.status = 'done';
+    job.status = 'ready';
     job.text = cached.trim();
   } else {
     enqueueJob(job);
@@ -314,7 +409,7 @@ app.get('/jobs/:id/status', (req, res) => {
 app.get('/jobs/:id/result', (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job) return res.status(404).json({ error: 'job not found' });
-  if (job.status !== 'done') {
+  if (job.status !== 'ready') {
     return res.status(409).json({ error: 'not ready', status: job.status });
   }
   res.type('text/plain').send(job.text || '');

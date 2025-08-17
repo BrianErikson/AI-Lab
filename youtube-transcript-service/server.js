@@ -53,13 +53,17 @@ async function runWhisper(audioPath) {
 app.post('/transcript', async (req, res) => {
   const { url } = req.body;
   console.log('Transcript request (YouTube URL):', url);
-  if (!url) {
+  if (typeof url !== 'string') {
     return res.status(400).json({ error: 'url required' });
+  }
+  const videoUrl = url.trim();
+  if (!ytdl.validateURL(videoUrl)) {
+    return res.status(400).json({ error: 'invalid YouTube url' });
   }
   let audioPath;
   let jsonPath;
   try {
-    audioPath = await downloadYoutubeAudio(url);
+    audioPath = await downloadYoutubeAudio(videoUrl);
     const result = await runWhisper(audioPath);
     jsonPath = result.jsonPath;
     res.type('text/plain').send(result.text.trim());

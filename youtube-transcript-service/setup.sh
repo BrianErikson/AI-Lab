@@ -5,22 +5,67 @@ APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 USER_NAME="$(whoami)"
 WHISPER_PATH="$HOME/.local/bin/whisper"
 
+# Detect package manager
+if command -v apt-get >/dev/null 2>&1; then
+  PKG=apt
+elif command -v dnf >/dev/null 2>&1; then
+  PKG=dnf
+elif command -v yum >/dev/null 2>&1; then
+  PKG=yum
+elif command -v pacman >/dev/null 2>&1; then
+  PKG=pacman
+else
+  echo "Unsupported Linux distribution." >&2
+  exit 1
+fi
+
 # Install Node.js if missing
 if ! command -v node >/dev/null 2>&1; then
   echo "Installing Node.js..."
-  curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-  sudo apt-get install -y nodejs
+  case $PKG in
+    apt)
+      curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+      sudo apt-get install -y nodejs
+      ;;
+    dnf|yum)
+      curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo -E bash -
+      sudo $PKG install -y nodejs
+      ;;
+    pacman)
+      sudo pacman -Sy --noconfirm nodejs npm
+      ;;
+  esac
 fi
 
 if ! command -v ffmpeg >/dev/null 2>&1; then
   echo "Installing ffmpeg..."
-  sudo apt-get update
-  sudo apt-get install -y ffmpeg
+  case $PKG in
+    apt)
+      sudo apt-get update
+      sudo apt-get install -y ffmpeg
+      ;;
+    dnf|yum)
+      sudo $PKG install -y ffmpeg
+      ;;
+    pacman)
+      sudo pacman -Sy --noconfirm ffmpeg
+      ;;
+  esac
 fi
 
 if ! command -v pipx >/dev/null 2>&1; then
   echo "Installing pipx..."
-  sudo apt-get install -y pipx
+  case $PKG in
+    apt)
+      sudo apt-get install -y pipx || python3 -m pip install --user pipx
+      ;;
+    dnf|yum)
+      sudo $PKG install -y pipx || python3 -m pip install --user pipx
+      ;;
+    pacman)
+      sudo pacman -Sy --noconfirm python-pipx || python3 -m pip install --user pipx
+      ;;
+  esac
   pipx ensurepath
 fi
 

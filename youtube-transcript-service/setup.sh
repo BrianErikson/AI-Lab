@@ -2,6 +2,8 @@
 set -e
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
+USER_NAME="$(whoami)"
+WHISPER_PATH="$HOME/.local/bin/whisper"
 
 # Install Node.js if missing
 if ! command -v node >/dev/null 2>&1; then
@@ -40,7 +42,9 @@ After=network.target
 
 [Service]
 Type=simple
+User=$USER_NAME
 WorkingDirectory=$APP_DIR
+Environment=WHISPER_BIN=$WHISPER_PATH
 ExecStart=/usr/bin/node $APP_DIR/server.js
 Restart=on-failure
 

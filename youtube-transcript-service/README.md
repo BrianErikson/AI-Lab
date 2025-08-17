@@ -54,7 +54,7 @@ For long-running transcriptions or Shortcuts clients, create a job and poll unti
    curl http://localhost:3001/jobs/<job-id>/status
    ```
 
-   Responds with `{ id, status, error? }` until `status` becomes `done`.
+   Responds with `{ id, status, error? }` as the job moves from `downloading` → `transcribing` → `ready`.
 
 3. **Fetch result**
 
@@ -62,7 +62,16 @@ For long-running transcriptions or Shortcuts clients, create a job and poll unti
    curl http://localhost:3001/jobs/<job-id>/result
    ```
 
-   When `status` is `done`, this returns the transcript as plain text. Completed results are cached by video so repeat requests finish immediately.
+When `status` is `ready`, this returns the transcript as plain text. Completed results are cached by video so repeat requests finish immediately.
 
 To run the optional integration test that exercises Whisper locally, set `RUN_WHISPER_TEST=1` before executing `npm test`.
+
+## Environment variables
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `MAX_DOWNLOAD_MS` | Timeout for YouTube downloads in milliseconds | `300000` |
+| `MAX_TRANSCRIBE_MS` | Timeout for Whisper transcription in milliseconds | `900000` |
+| `WHISPER_CONCURRENCY` | Maximum concurrent Whisper processes | `1` |
+| `CACHE_MAX_BYTES` | Maximum total size of cached transcripts; set `0` to disable the limit | `536870912` |
 

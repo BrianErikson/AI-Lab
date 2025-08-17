@@ -107,7 +107,7 @@ test('job creation returns id', async (t) => {
   assert.equal(data.status, 'queued');
 });
 
-test('job returns done immediately when cached', async (t) => {
+test('job returns ready immediately when cached', async (t) => {
   const videoId = 'DUMMYID12345';
   const cachedText = 'cached transcript';
   fs.writeFileSync(path.join(process.env.CACHE_DIR, `${videoId}.txt`), cachedText);
@@ -121,7 +121,7 @@ test('job returns done immediately when cached', async (t) => {
   });
   assert.equal(res.status, 200);
   const data = await res.json();
-  assert.equal(data.status, 'done');
+  assert.equal(data.status, 'ready');
   const result = await fetch(`http://localhost:${port}/jobs/${data.id}/result`);
   assert.equal(await result.text(), cachedText);
 });

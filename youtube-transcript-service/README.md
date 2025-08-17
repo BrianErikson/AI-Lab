@@ -1,6 +1,6 @@
 # YouTube Transcript Service
 
-Small Node.js service that returns the transcript of a YouTube video.
+Small Node.js service that transcribes audio using [Whisper](https://github.com/openai/whisper). It can download audio from a YouTube URL or transcribe an uploaded audio file.
 
 ## Quick start
 
@@ -12,11 +12,12 @@ cd AI-Lab/youtube-transcript-service
 ./setup.sh
 ```
 
-The script installs Node.js (if missing), installs or updates dependencies, recreates the `transcript` systemd service, and restarts it on port `3001`.
+The script installs Node.js (if missing), Whisper, and other dependencies. It recreates the `transcript` systemd service under your user account and restarts it on port `3001`.
+The server searches for the Whisper CLI in your `PATH` or at `~/.local/bin/whisper`; set `WHISPER_BIN` if it lives elsewhere.
 
 ## API
 
-Send a POST request with JSON body `{ "url": "https://youtu.be/..." }` to receive the transcript as plain text:
+Send a POST request with JSON body containing a YouTube URL to receive the transcription as plain text:
 
 ```bash
 curl -X POST http://localhost:3001/transcript \
@@ -24,5 +25,12 @@ curl -X POST http://localhost:3001/transcript \
   -d '{"url":"https://youtu.be/dQw4w9WgXcQ"}'
 ```
 
-The service will respond with the concatenated transcript if available.
+To transcribe a local audio file, upload it via `PUT` using multipart form data:
+
+```bash
+curl -X PUT http://localhost:3001/transcript \
+  -F file=@/path/to/audio.mp3
+```
+
+To run the optional integration test that exercises Whisper locally, set `RUN_WHISPER_TEST=1` before executing `npm test`.
 

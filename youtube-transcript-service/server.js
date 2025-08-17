@@ -11,18 +11,31 @@ export const app = express();
 app.use(express.json());
 const upload = multer({ dest: tmpdir() });
 
+export function normalizeYoutubeUrl(url) {
+  const id = ytdl.getURLVideoID(url);
+  return `https://www.youtube.com/watch?v=${id}`;
+}
+
 const defaultWhisper = path.join(homedir(), '.local', 'bin', 'whisper');
 const WHISPER_BIN = process.env.WHISPER_BIN || (fs.existsSync(defaultWhisper) ? defaultWhisper : 'whisper');
 
 async function downloadYoutubeAudio(url) {
+  const id = ytdl.getURLVideoID(url);
+  console.log('Downloading audio for video ID:', id);
   const output = path.join(tmpdir(), `${randomUUID()}.mp3`);
   const stream = ytdl(url, { filter: 'audioonly' });
   const file = fs.createWriteStream(output);
   stream.pipe(file);
   await new Promise((resolve, reject) => {
     file.on('finish', resolve);
-    stream.on('error', reject);
-    file.on('error', reject);
+    stream.on('error', err => {
+      console.error('Download stream error:', err);
+      reject(err);
+    });
+    file.on('error', err => {
+      console.error('File write error:', err);
+      reject(err);
+    });
   });
   return output;
 }
@@ -60,15 +73,17 @@ app.post('/transcript', async (req, res) => {
   if (!ytdl.validateURL(videoUrl)) {
     return res.status(400).json({ error: 'invalid YouTube url' });
   }
+  const normalizedUrl = normalizeYoutubeUrl(videoUrl);
+  console.log('Normalized YouTube URL:', normalizedUrl);
   let audioPath;
   let jsonPath;
   try {
-    audioPath = await downloadYoutubeAudio(videoUrl);
+    audioPath = await downloadYoutubeAudio(normalizedUrl);
     const result = await runWhisper(audioPath);
     jsonPath = result.jsonPath;
     res.type('text/plain').send(result.text.trim());
   } catch (e) {
-    console.error('Transcription error:', e.message);
+    console.error('Transcription error:', e);
     res.status(500).json({ error: e.message });
   } finally {
     if (jsonPath) fs.unlink(jsonPath, () => {});
@@ -86,7 +101,7 @@ app.put('/transcript', upload.single('file'), async (req, res) => {
     jsonPath = result.jsonPath;
     res.type('text/plain').send(result.text.trim());
   } catch (e) {
-    console.error('Transcription error:', e.message);
+    console.error('Transcription error:', e);
     res.status(500).json({ error: e.message });
   } finally {
     if (jsonPath) fs.unlink(jsonPath, () => {});
@@ -98,3 +113,4 @@ if (process.env.NODE_ENV !== 'test') {
   const port = process.env.PORT || 3001;
   app.listen(port, () => console.log(`Listening on port ${port}`));
 }
+

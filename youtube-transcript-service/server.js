@@ -11,15 +11,95 @@ export const app = express();
 app.use(express.json());
 const upload = multer({ dest: tmpdir() });
 
+// Environment configuration
+const MIN_GAP_MS = parseInt(process.env.MIN_GAP_MS || '7000', 10);
+const CACHE_DIR = process.env.CACHE_DIR || path.join(homedir(), '.transcripts-cache');
+const CACHE_TTL_MS = parseInt(process.env.CACHE_TTL_MS || '604800000', 10);
+const YTDLP_LIMIT_RATE = process.env.YTDLP_LIMIT_RATE || '1500K';
+const YTDLP_RETRIES = parseInt(process.env.YTDLP_RETRIES || '3', 10);
+
+fs.mkdirSync(CACHE_DIR, { recursive: true });
+
+// Simple FIFO queue for network work
+const queue = [];
+let pumping = false;
+
+export function enqueue(fn) {
+  return new Promise((resolve, reject) => {
+    queue.push({ fn, resolve, reject });
+    if (!pumping) pump();
+  });
+}
+
+export async function pump() {
+  pumping = true;
+  while (queue.length) {
+    const { fn, resolve, reject } = queue[0];
+    try {
+      const result = await fn();
+      resolve(result);
+    } catch (e) {
+      reject(e);
+    }
+    queue.shift();
+    if (queue.length) {
+      const jitter = Math.floor(Math.random() * 4000) - 2000; // ±2s
+      await new Promise(r => setTimeout(r, Math.max(0, MIN_GAP_MS + jitter)));
+    }
+  }
+  pumping = false;
+}
+
+// Exponential backoff helper
+export async function withBackoff(fn, opts = {}) {
+  const { retries = 3, base = 1000, max = 15000 } = opts;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const retriable =
+        [429, 403].some(code => String(e.message).includes(code)) ||
+        ['ECONNRESET', 'ETIMEDOUT'].includes(e.code);
+      if (attempt >= retries || !retriable) throw e;
+      const delay = Math.min(max, base * 2 ** attempt) * (0.5 + Math.random());
+      console.warn(`backoff: ${e.message || e} - waiting ${Math.round(delay)}ms`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
+function cachePath(id) {
+  return path.join(CACHE_DIR, `${id}.txt`);
+}
+
+function readCache(id) {
+  try {
+    const fp = cachePath(id);
+    const stat = fs.statSync(fp);
+    if (Date.now() - stat.mtimeMs <= CACHE_TTL_MS) {
+      return fs.readFileSync(fp, 'utf8');
+    }
+  } catch {}
+  return null;
+}
+
+function writeCache(id, text) {
+  try {
+    fs.writeFileSync(cachePath(id), text);
+  } catch {}
+}
+
 export function extractVideoID(url) {
   try {
     const u = new URL(url);
-    if (u.hostname === 'youtu.be') {
+    const host = u.hostname.replace(/^www\./, '');
+    if (host === 'youtu.be') {
       return u.pathname.slice(1);
     }
-    if (u.hostname === 'www.youtube.com' || u.hostname === 'youtube.com') {
+    if (['youtube.com', 'music.youtube.com', 'm.youtube.com'].includes(host)) {
       if (u.pathname === '/watch') {
-        return u.searchParams.get('v');
+        const id = u.searchParams.get('v');
+        if (id) return id;
       }
     }
   } catch {}
@@ -43,7 +123,14 @@ async function downloadYoutubeAudio(url) {
     extractAudio: true,
     audioFormat: 'mp3',
     audioQuality: 0,
-    quiet: true
+    quiet: true,
+    noPlaylist: true,
+    ignoreConfig: true,
+    concurrentFragments: 1,
+    sleepRequests: 1.0,
+    limitRate: YTDLP_LIMIT_RATE,
+    retries: YTDLP_RETRIES,
+    fragmentRetries: YTDLP_RETRIES
   });
   return output;
 }
@@ -78,19 +165,34 @@ app.post('/transcript', async (req, res) => {
     return res.status(400).json({ error: 'url required' });
   }
   const videoUrl = url.trim();
-  let normalizedUrl;
+  let id;
   try {
-    normalizedUrl = normalizeYoutubeUrl(videoUrl);
+    id = extractVideoID(videoUrl);
   } catch {
     return res.status(400).json({ error: 'invalid YouTube url' });
   }
+  const normalizedUrl = normalizeYoutubeUrl(videoUrl);
   console.log('Normalized YouTube URL:', normalizedUrl);
+
+  const cached = readCache(id);
+  if (cached) {
+    console.log('Cache hit for video ID:', id);
+    return res.type('text/plain').send(cached.trim());
+  }
+
   let audioPath;
   let jsonPath;
   try {
-    audioPath = await downloadYoutubeAudio(normalizedUrl);
+    audioPath = await enqueue(() =>
+      withBackoff(() => downloadYoutubeAudio(normalizedUrl), {
+        retries: YTDLP_RETRIES,
+        base: 1000,
+        max: 15000
+      })
+    );
     const result = await runWhisper(audioPath);
     jsonPath = result.jsonPath;
+    writeCache(id, result.text);
     res.type('text/plain').send(result.text.trim());
   } catch (e) {
     console.error('Transcription error:', e);

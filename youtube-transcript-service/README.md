@@ -17,6 +17,8 @@ The server searches for the Whisper CLI in your `PATH` or at `~/.local/bin/whisp
 
 ## API
 
+### `/transcript`
+
 Send a POST request with JSON body containing a YouTube URL to receive the transcription as plain text:
 
 ```bash
@@ -31,6 +33,36 @@ To transcribe a local audio file, upload it via `PUT` using multipart form data:
 curl -X PUT http://localhost:3001/transcript \
   -F file=@/path/to/audio.mp3
 ```
+
+### `/jobs`
+
+For long-running transcriptions or Shortcuts clients, create a job and poll until the transcript is ready.
+
+1. **Create a job**
+
+   ```bash
+   curl -X POST http://localhost:3001/jobs \
+     -H 'Content-Type: application/json' \
+     -d '{"url":"https://youtu.be/dQw4w9WgXcQ"}'
+   ```
+
+   Returns `202 Accepted` with `{ id, status }`.
+
+2. **Poll status**
+
+   ```bash
+   curl http://localhost:3001/jobs/<job-id>/status
+   ```
+
+   Responds with `{ id, status, error? }` until `status` becomes `done`.
+
+3. **Fetch result**
+
+   ```bash
+   curl http://localhost:3001/jobs/<job-id>/result
+   ```
+
+   When `status` is `done`, this returns the transcript as plain text. Completed results are cached by video so repeat requests finish immediately.
 
 To run the optional integration test that exercises Whisper locally, set `RUN_WHISPER_TEST=1` before executing `npm test`.
 

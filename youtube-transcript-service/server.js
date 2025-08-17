@@ -4,7 +4,7 @@ import path from 'path';
 import { tmpdir, homedir } from 'os';
 import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
-import ytdl from 'ytdl-core';
+import ytdl from '@distube/ytdl-core';
 import multer from 'multer';
 
 export const app = express();

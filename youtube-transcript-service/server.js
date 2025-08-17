@@ -4,15 +4,30 @@ import path from 'path';
 import { tmpdir, homedir } from 'os';
 import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
-import ytdl from '@distube/ytdl-core';
+import youtubedl from 'yt-dlp-exec';
 import multer from 'multer';
 
 export const app = express();
 app.use(express.json());
 const upload = multer({ dest: tmpdir() });
 
+export function extractVideoID(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'youtu.be') {
+      return u.pathname.slice(1);
+    }
+    if (u.hostname === 'www.youtube.com' || u.hostname === 'youtube.com') {
+      if (u.pathname === '/watch') {
+        return u.searchParams.get('v');
+      }
+    }
+  } catch {}
+  throw new Error('invalid YouTube url');
+}
+
 export function normalizeYoutubeUrl(url) {
-  const id = ytdl.getURLVideoID(url);
+  const id = extractVideoID(url);
   return `https://www.youtube.com/watch?v=${id}`;
 }
 
@@ -20,22 +35,15 @@ const defaultWhisper = path.join(homedir(), '.local', 'bin', 'whisper');
 const WHISPER_BIN = process.env.WHISPER_BIN || (fs.existsSync(defaultWhisper) ? defaultWhisper : 'whisper');
 
 async function downloadYoutubeAudio(url) {
-  const id = ytdl.getURLVideoID(url);
+  const id = extractVideoID(url);
   console.log('Downloading audio for video ID:', id);
   const output = path.join(tmpdir(), `${randomUUID()}.mp3`);
-  const stream = ytdl(url, { filter: 'audioonly' });
-  const file = fs.createWriteStream(output);
-  stream.pipe(file);
-  await new Promise((resolve, reject) => {
-    file.on('finish', resolve);
-    stream.on('error', err => {
-      console.error('Download stream error:', err);
-      reject(err);
-    });
-    file.on('error', err => {
-      console.error('File write error:', err);
-      reject(err);
-    });
+  await youtubedl(url, {
+    output,
+    extractAudio: true,
+    audioFormat: 'mp3',
+    audioQuality: 0,
+    quiet: true
   });
   return output;
 }
@@ -70,10 +78,12 @@ app.post('/transcript', async (req, res) => {
     return res.status(400).json({ error: 'url required' });
   }
   const videoUrl = url.trim();
-  if (!ytdl.validateURL(videoUrl)) {
+  let normalizedUrl;
+  try {
+    normalizedUrl = normalizeYoutubeUrl(videoUrl);
+  } catch {
     return res.status(400).json({ error: 'invalid YouTube url' });
   }
-  const normalizedUrl = normalizeYoutubeUrl(videoUrl);
   console.log('Normalized YouTube URL:', normalizedUrl);
   let audioPath;
   let jsonPath;

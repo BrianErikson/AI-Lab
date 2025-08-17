@@ -26,6 +26,18 @@ test('rejects invalid url', async (t) => {
   assert.equal(res.status, 400);
 });
 
+test('rejects malformed youtube domain', async (t) => {
+  const server = app.listen(0);
+  t.after(() => server.close());
+  const port = server.address().port;
+  const res = await fetch(`http://localhost:${port}/transcript`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://youtube.be/abc123' })
+  });
+  assert.equal(res.status, 400);
+});
+
 test('requires file on PUT', async (t) => {
   const server = app.listen(0);
   t.after(() => server.close());

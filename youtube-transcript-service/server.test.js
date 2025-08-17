@@ -1,14 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mock } from 'node:test';
-import { YoutubeTranscript } from 'youtube-transcript';
-import { app } from './server.js';
+import { app, transcriber } from './server.js';
 
 test('handles youtu.be URLs with extra params', async (t) => {
   const calls = [];
-  mock.method(YoutubeTranscript, 'fetchTranscript', async (id) => {
+  mock.method(transcriber, 'fromVideoId', async (id) => {
     calls.push(id);
-    return [{ text: 'hi' }];
+    return 'hi';
   });
 
   const server = app.listen(0);

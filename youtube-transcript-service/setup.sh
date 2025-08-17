@@ -3,11 +3,30 @@ set -e
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Ensure package list is up to date
+sudo apt-get update
+
 # Install Node.js if missing
 if ! command -v node >/dev/null 2>&1; then
   echo "Installing Node.js..."
   curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
   sudo apt-get install -y nodejs
+fi
+
+# Install Python and Whisper CLI dependencies
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "Installing Python3 and pip..."
+  sudo apt-get install -y python3 python3-pip
+fi
+
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "Installing ffmpeg..."
+  sudo apt-get install -y ffmpeg
+fi
+
+if ! command -v whisper >/dev/null 2>&1; then
+  echo "Installing Whisper CLI..."
+  sudo pip3 install -U openai-whisper
 fi
 
 cd "$APP_DIR"

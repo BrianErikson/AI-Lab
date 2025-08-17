@@ -21,7 +21,7 @@ const MAX_DOWNLOAD_MS = parseInt(process.env.MAX_DOWNLOAD_MS || '300000', 10);
 const MAX_TRANSCRIBE_MS = parseInt(process.env.MAX_TRANSCRIBE_MS || '900000', 10);
 const WHISPER_CONCURRENCY = parseInt(process.env.WHISPER_CONCURRENCY || '1', 10);
 const CACHE_SWEEP_MS = parseInt(process.env.CACHE_SWEEP_MS || '3600000', 10);
-const CACHE_MAX_BYTES = parseInt(process.env.CACHE_MAX_BYTES || '0', 10);
+const CACHE_MAX_BYTES = parseInt(process.env.CACHE_MAX_BYTES || '536870912', 10);
 
 fs.mkdirSync(CACHE_DIR, { recursive: true });
 

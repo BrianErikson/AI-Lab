@@ -73,5 +73,5 @@ To run the optional integration test that exercises Whisper locally, set `RUN_WH
 | `MAX_DOWNLOAD_MS` | Timeout for YouTube downloads in milliseconds | `300000` |
 | `MAX_TRANSCRIBE_MS` | Timeout for Whisper transcription in milliseconds | `900000` |
 | `WHISPER_CONCURRENCY` | Maximum concurrent Whisper processes | `1` |
-| `CACHE_MAX_BYTES` | Maximum total size of cached transcripts; `0` disables the limit | `0` |
+| `CACHE_MAX_BYTES` | Maximum total size of cached transcripts; set `0` to disable the limit | `536870912` |
 
